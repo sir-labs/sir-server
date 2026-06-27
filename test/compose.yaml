@@ -1,0 +1,8 @@
+services:
+  test-web:
+    image: nginx:alpine
+    container_name: web
+    labels:
+      proxy.enable: "true"
+      proxy.host: "${DOMAIN:-sir-labs.com}"
+    restart: unless-stopped

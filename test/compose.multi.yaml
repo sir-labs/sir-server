@@ -1,0 +1,37 @@
+# Case: หลาย services ใน compose เดียว แต่ละตัว config ต่างกัน
+# Expected:
+#   alpha.sir-labs.com   → 200 (basic)
+#   beta.sir-labs.com    → 200 (custom port 8080)
+#   gamma.sir-labs.com   → 200 (custom host)
+#   no-proxy-svc         → ไม่ปรากฏใน routes เลย
+services:
+  multi-alpha:
+    image: nginx:alpine
+    container_name: alpha
+    labels:
+      proxy.enable: "true"
+    restart: unless-stopped
+
+  multi-beta:
+    image: nginx:alpine
+    container_name: beta
+    command: >
+      sh -c "sed -i 's/listen\s*80/listen 8080/' /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    labels:
+      proxy.enable: "true"
+      proxy.port: "8080"
+    restart: unless-stopped
+
+  multi-gamma:
+    image: nginx:alpine
+    container_name: multi-gamma
+    labels:
+      proxy.enable: "true"
+      proxy.host: "gamma.${DOMAIN:-sir-labs.com}"
+    restart: unless-stopped
+
+  no-proxy-svc:
+    image: nginx:alpine
+    container_name: no-proxy-svc
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+# traefik/whoami — ตอบกลับด้วย hostname, IP, request headers ทั้งหมด
+# ดีสำหรับ verify ว่า X-Forwarded-For, X-Real-IP ผ่านมาถูก
+# Expected: whoami.sir-labs.com → 200 + แสดง header ที่ nginx inject
+services:
+  whoami:
+    image: traefik/whoami
+    container_name: whoami
+    labels:
+      proxy.enable: "true"
+    restart: unless-stopped

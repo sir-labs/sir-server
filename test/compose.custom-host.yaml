@@ -1,0 +1,10 @@
+# Case: กำหนด hostname เองด้วย proxy.host (ไม่ใช้ชื่อ container)
+# Expected: myapi.sir-labs.com → 200, container-name.sir-labs.com → 404
+services:
+  ugly-container-name-xyz:
+    image: nginx:alpine
+    container_name: ugly-container-name-xyz
+    labels:
+      proxy.enable: "true"
+      proxy.host: "myapi.${DOMAIN:-sir-labs.com}"
+    restart: unless-stopped

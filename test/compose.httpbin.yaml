@@ -1,0 +1,11 @@
+# go-httpbin — HTTP introspection service (GET /headers, /ip, /get, ฯลฯ)
+# ดีสำหรับ test ว่า proxy ส่ง headers ครบ และ upstream IP ถูกต้อง
+# Expected: httpbin.sir-labs.com/headers → JSON แสดง X-Forwarded-For
+services:
+  httpbin:
+    image: mccutchen/go-httpbin
+    container_name: httpbin
+    labels:
+      proxy.enable: "true"
+      proxy.port: "8080"
+    restart: unless-stopped

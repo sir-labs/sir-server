@@ -1,0 +1,9 @@
+# Case: subdomain อัตโนมัติจากชื่อ container (ไม่ระบุ proxy.host)
+# Expected: basic-app.sir-labs.com → 200
+services:
+  basic-app:
+    image: nginx:alpine
+    container_name: basic-app
+    labels:
+      proxy.enable: "true"
+    restart: unless-stopped

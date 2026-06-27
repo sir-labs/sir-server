@@ -1,0 +1,18 @@
+# portainer — real app UI สำหรับจัดการ Docker
+# ทดสอบว่า proxy รับมือ app ที่มี static assets, redirect, cookie ได้
+# Expected: docker-ui.sir-labs.com → 200 redirect ไป /#!/
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    labels:
+      proxy.enable: "true"
+      proxy.host: "docker-ui.${DOMAIN:-sir-labs.com}"
+      proxy.port: "9000"
+    restart: unless-stopped
+
+volumes:
+  portainer_data:

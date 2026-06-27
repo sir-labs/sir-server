@@ -1,0 +1,19 @@
+# Case: สอง containers อ้าง proxy.host เดียวกัน
+# Expected: ตัวแรกได้ route, ตัวที่สองถูก skip พร้อม WARNING ใน watcher log
+# (ลำดับ container list จาก Docker API ไม่รับประกัน)
+services:
+  dup-first:
+    image: nginx:alpine
+    container_name: dup-first
+    labels:
+      proxy.enable: "true"
+      proxy.host: "shared.${DOMAIN:-sir-labs.com}"
+    restart: unless-stopped
+
+  dup-second:
+    image: nginx:alpine
+    container_name: dup-second
+    labels:
+      proxy.enable: "true"
+      proxy.host: "shared.${DOMAIN:-sir-labs.com}"
+    restart: unless-stopped

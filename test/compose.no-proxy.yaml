@@ -1,0 +1,7 @@
+# Case: container ที่ไม่มี proxy.enable label เลย
+# Expected: ไม่ปรากฏใน /routes และ no-label.sir-labs.com → 404
+services:
+  no-label-svc:
+    image: nginx:alpine
+    container_name: no-label-svc
+    restart: unless-stopped

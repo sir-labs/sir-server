@@ -1,0 +1,13 @@
+# Case: container ฟังบน port ที่ไม่ใช่ 80 (ต้องระบุ proxy.port)
+# Expected: port-app.sir-labs.com → proxied to container:8080
+services:
+  port-app:
+    image: nginx:alpine
+    container_name: port-app
+    command: >
+      sh -c "sed -i 's/listen\s*80/listen 8080/' /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    labels:
+      proxy.enable: "true"
+      proxy.port: "8080"
+    restart: unless-stopped
