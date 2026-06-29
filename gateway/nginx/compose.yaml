@@ -1,0 +1,24 @@
+services:
+  sir-nginx:
+    image: nginx:alpine
+    container_name: sir-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - nginx-conf:/etc/nginx/conf.d
+      - ./fallback.html:/usr/share/nginx/html/fallback.html:ro
+    networks:
+      - sir-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+networks:
+  sir-net:
+
+volumes:
+  nginx-conf:

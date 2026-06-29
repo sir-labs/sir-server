@@ -1,59 +1,7 @@
-services:
-  sir-nginx:
-    image: nginx:alpine
-    container_name: sir-nginx
-    ports:
-      - "80:80"
-    volumes:
-      - nginx-conf:/etc/nginx/conf.d
-    networks:
-      - sir-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "nginx", "-t"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-
-  sir-watcher:
-    build:
-      context: .
-      dockerfile: watcher/Dockerfile
-    container_name: sir-watcher
-    ports:
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - nginx-conf:/etc/nginx/conf.d
-    environment:
-      - DOMAIN=${DOMAIN:-sir-labs.com}
-      - NGINX_CONTAINER=sir-nginx
-      - PROXY_NETWORK=sir-server_sir-net
-      - CONF_DIR=/etc/nginx/conf.d
-      - DASHBOARD_PORT=8080
-    labels:
-      proxy.enable: "true"
-      proxy.host: "proxy.${DOMAIN:-sir-labs.com}"
-      proxy.port: "8080"
-    networks:
-      - sir-net
-    restart: unless-stopped
-    depends_on:
-      sir-nginx:
-        condition: service_healthy
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared
-    command: tunnel --no-autoupdate --config /home/nonroot/.cloudflared/config.yaml run
-    volumes:
-      - ./cloudflared:/home/nonroot/.cloudflared:ro
-    networks:
-      - sir-net
-    restart: unless-stopped
-    depends_on:
-      - sir-nginx
+include:
+  - gateway/nginx/compose.yaml
+  - gateway/watcher/compose.yaml
+  - gateway/cloudflared/compose.yaml
 
 networks:
   sir-net:
