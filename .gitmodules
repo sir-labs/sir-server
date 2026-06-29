@@ -1,0 +1,3 @@
+[submodule "service/latex-server/repo"]
+	path = service/latex-server/repo
+	url = https://github.com/sir-labs/latex-server
