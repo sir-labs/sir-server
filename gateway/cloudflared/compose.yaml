@@ -1,0 +1,15 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate --config /home/nonroot/.cloudflared/config.yaml run
+    volumes:
+      - ./:/home/nonroot/.cloudflared:ro
+    networks:
+      - sir-net
+    restart: unless-stopped
+    depends_on:
+      - sir-nginx
+
+networks:
+  sir-net:
