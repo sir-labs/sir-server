@@ -10,14 +10,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - nginx-conf:/etc/nginx/conf.d
     environment:
-      - DOMAIN=${DOMAIN:-sir-labs.com}
-      - NGINX_CONTAINER=sir-nginx
-      - PROXY_NETWORK=sir-server_sir-net
-      - CONF_DIR=/etc/nginx/conf.d
-      - DASHBOARD_PORT=8080
+      DOMAIN: ${DOMAIN:-sir-labs.com}
+      NGINX_CONTAINER: sir-nginx
+      PROXY_NETWORK: sir-server_sir-net
+      CONF_DIR: /etc/nginx/conf.d
+      DASHBOARD_PORT: "8080"
     labels:
       proxy.enable: "true"
-      proxy.host: "proxy.${DOMAIN:-sir-labs.com}"
+      proxy.host: proxy.${DOMAIN:-sir-labs.com}
       proxy.port: "8080"
     networks:
       - sir-net

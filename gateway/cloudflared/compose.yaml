@@ -9,7 +9,8 @@ services:
       - sir-net
     restart: unless-stopped
     depends_on:
-      - sir-nginx
+      sir-nginx:
+        condition: service_healthy
 
 networks:
   sir-net:
