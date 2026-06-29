@@ -1,4 +1,4 @@
 name: sir-services
 
 include:
-  - service/latex-server/repo/compose.yaml
+  - service/latex-server/compose.yaml
