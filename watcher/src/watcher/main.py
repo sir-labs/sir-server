@@ -197,6 +197,8 @@ def reload_nginx(client: docker.DockerClient) -> None:
         log.info("Nginx reloaded")
     except docker.errors.NotFound:
         log.warning("Nginx container %s not found", NGINX_CONTAINER)
+    except docker.errors.APIError as e:
+        log.warning("Nginx not ready, skipping reload: %s", e)
 
 
 def generate_configs(client: docker.DockerClient) -> None:
