@@ -4,3 +4,6 @@
 [submodule "service/psoriasis-service"]
 	path = service/psoriasis-service
 	url = git@gitlab.nectec.or.th:skinmedai/psoriasis_service.git
+[submodule "service/sir-voice"]
+	path = service/sir-voice
+	url = https://github.com/sir-labs/sir-voice
