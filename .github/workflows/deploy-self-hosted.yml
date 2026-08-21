@@ -21,11 +21,18 @@ jobs:
         run: docker info >/dev/null
       - name: Validate
         run: docker compose config --quiet
-      # The gateway routes this host's traffic, but the runner talks to
-      # GitHub outbound only — a brief nginx/cloudflared restart here does
-      # not cut the job off from its own control plane.
+      # Fetch and build everything up front: `up` then only has to swap
+      # containers, which keeps the gateway (and every *.sir-labs.com route
+      # through it) down for seconds instead of minutes.
+      - name: Pull and build images
+        run: |
+          docker compose pull --ignore-buildable --quiet
+          docker compose build
+      # Recreating the gateway drops the runner's own long-poll to GitHub
+      # (SocketException 125), so the NEXT queued job waits out a reconnect
+      # backoff. The job doing the deploying still finishes fine.
       - name: Deploy
-        run: docker compose up -d --build --remove-orphans --wait
+        run: docker compose up -d --remove-orphans --wait
       - name: Prune unused images
         if: always()
         run: docker image prune -f
