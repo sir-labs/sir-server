@@ -1,1 +1,2 @@
 service/*.env
+gateway/watcher/watcher
