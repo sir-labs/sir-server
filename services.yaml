@@ -2,4 +2,3 @@ name: sir-services
 
 include:
   - service/latex-server/compose.yaml
-  - service/psoriasis-service/compose.prod.yaml
