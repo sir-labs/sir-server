@@ -1,0 +1,31 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sir-server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, sir-labs]
+    steps:
+      # No submodules: compose.yaml only includes gateway/*, and one of the
+      # submodules is a private GitLab repo the runner can't clone. Deploy
+      # the services in services.yaml from their own repos instead.
+      - uses: actions/checkout@v7
+      - name: Verify Docker access
+        run: docker info >/dev/null
+      - name: Validate
+        run: docker compose config --quiet
+      # The gateway routes this host's traffic, but the runner talks to
+      # GitHub outbound only — a brief nginx/cloudflared restart here does
+      # not cut the job off from its own control plane.
+      - name: Deploy
+        run: docker compose up -d --build --remove-orphans --wait
+      - name: Prune unused images
+        if: always()
+        run: docker image prune -f

@@ -19,6 +19,8 @@ services:
       proxy.enable: "true"
       proxy.host: proxy.${DOMAIN:-sir-labs.com}
       proxy.port: "8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # same target sir-nginx uses — lets the watcher verify it's reachable before writing internal.conf
     networks:
       - sir-net
     restart: unless-stopped

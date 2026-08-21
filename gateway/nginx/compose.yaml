@@ -9,6 +9,8 @@ services:
       - ./fallback.html:/usr/share/nginx/html/fallback.html:ro
     networks:
       - sir-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets internal.<DOMAIN>/{port}/ routes reach services published on the host
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "nginx", "-t"]

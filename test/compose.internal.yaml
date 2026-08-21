@@ -1,0 +1,39 @@
+# Case: shared path-based routing via internal.<DOMAIN> — proxy.host set to the
+# internal host, proxy.port doubles as the URL path segment. Routing targets
+# the DOCKER HOST's network (not sir-net), so the port must be published.
+# Expected: internal.sir-labs.com/3001/ → host's localhost:3001 (internal-a)
+# internal.sir-labs.com/3002/ → host's localhost:3002 (internal-b)
+# internal.sir-labs.com/ → index page linking both; internal.sir-labs.com/3001 (no slash) → 301 to /3001/
+services:
+  internal-a:
+    image: nginx:alpine
+    container_name: internal-a
+    command: >
+      sh -c "sed -i 's/listen\s*80/listen 3001/' /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    ports:
+      - "3001:3001"   # required — internal routing reaches the host, not this container's docker-network IP
+    labels:
+      proxy.enable: "true"
+      proxy.host: "internal.sir-labs.com"
+      proxy.port: "3001"
+    restart: unless-stopped
+
+  internal-b:
+    image: nginx:alpine
+    container_name: internal-b
+    command: >
+      sh -c "sed -i 's/listen\s*80/listen 3002/' /etc/nginx/conf.d/default.conf
+      && nginx -g 'daemon off;'"
+    ports:
+      - "3002:3002"
+    labels:
+      proxy.enable: "true"
+      proxy.host: "internal.sir-labs.com"
+      proxy.port: "3002"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3002"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
