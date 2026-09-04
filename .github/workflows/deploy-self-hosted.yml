@@ -32,7 +32,7 @@ jobs:
       # (SocketException 125), so the NEXT queued job waits out a reconnect
       # backoff. The job doing the deploying still finishes fine.
       - name: Deploy
-        run: docker compose up -d --remove-orphans --wait
+        run: docker compose up -d --remove-orphans --force-recreate --wait
       - name: Prune unused images
         if: always()
         run: docker image prune -f
