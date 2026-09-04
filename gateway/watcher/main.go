@@ -74,9 +74,15 @@ server {
 const defaultConf = `server {
     listen 80 default_server;
     server_name _;
+    root /usr/share/nginx/html;
 
     location / {
         return 404;
+    }
+
+    error_page 404 /fallback.html;
+    location = /fallback.html {
+        internal;
     }
 }
 `
