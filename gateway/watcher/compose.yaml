@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: sir-watcher
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"   # dashboard is served via proxy.sir-labs.com (gated); host port is local-only
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - nginx-conf:/etc/nginx/conf.d
