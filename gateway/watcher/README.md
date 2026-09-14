@@ -111,6 +111,17 @@ considered healthy, same as before this existed.
 - `AUTH_HOST` (`auth.{DOMAIN}`) ไม่ถูก gate เสมอ ไม่ว่า label จะเป็นอะไร; `AUTH_ENABLED=false` ปิด gate ทั้งระบบ (kill switch)
 - `internal.{DOMAIN}`: gate ทีละ location ตาม label ของแต่ละ service; หน้า index `/` gate เสมอ
   (`/{port}` ไม่มี slash ที่ 301 ไป `/{port}/` ไม่ถูก gate โดยตั้งใจ — ปลายทาง gate อยู่แล้ว รั่วแค่ว่ามี port นี้)
+- **Token (ไม่ใช้ browser):** ส่ง `Authorization: Bearer sirpat_…` (สร้างที่ `https://{AUTH_HOST}/account/tokens`)
+  - token ผิด/หมดอายุ/ถูก revoke → **401 JSON** `{"error":"invalid_token"}` + `WWW-Authenticate: Bearer realm="sir-labs"`
+    (ไม่ใช่ 302 ไปหน้า login) — ถ้าส่ง sirpat มา sir-auth จะไม่ fallback ไปใช้ cookie
+  - nginx **ลบ** `Authorization` ที่เป็น `Bearer sirpat_…` ก่อนส่งให้ backend ทุก route (gated, public, internal) —
+    token ไม่รั่วไปถึง app; `Authorization` แบบอื่น (เช่น JWT ของ app เอง) ผ่านไปตามเดิม
+- verify subrequest ส่ง `Cookie`, `Authorization`, `X-Original-URI`, `X-Original-Host`, `X-Original-Method` และ
+  `X-Real-IP` (= `CF-Connecting-IP` ถ้ามี ไม่งั้น `$remote_addr`; spoof ได้จาก LAN — ใช้เป็นข้อมูลเท่านั้น) ให้ sir-auth
+- `https://{AUTH_HOST}/session/verify` จากภายนอกได้ **404** — nginx เรียก verify ตรงที่ `AUTH_UPSTREAM` จึงไม่กระทบ
+- `map` ของ `$sir_pat` / `$sir_backend_auth` / `$sir_client_ip` อยู่ใน `conf.d/00-sir-auth.conf` (http context)
+  เขียนใหม่ทุกครั้งที่ regenerate แม้ไม่มี route ที่ gate หรือ `AUTH_ENABLED=false`
+- log การใช้งานบันทึกเฉพาะ request บน route ที่ gate และไม่รู้ status ที่ backend ตอบ (auth_request เห็นแค่ขาเข้า)
 - nginx ไม่ intercept 401 ของ backend เอง (`proxy_intercept_errors` off) — redirect ไป login เกิดเฉพาะ 401 จาก `/session/verify`
 
 **รูปแบบ `rd`:** stock nginx urlencode ไม่ได้ `rd` จึงเป็น URL ดิบ (`$request_uri` ตามที่ client ส่งมา) และเป็น

@@ -79,14 +79,54 @@ func authServerBlock() string {
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
         proxy_set_header Cookie $http_cookie;
+        proxy_set_header Authorization $http_authorization;
         proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header X-Original-Host $host;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Real-IP $sir_client_ip;
     }
 
     location @sir_login {
+        default_type application/json;
+        if ($sir_pat) {
+            add_header WWW-Authenticate 'Bearer realm="sir-labs"' always;
+            return 401 '{"error":"invalid_token"}\n';
+        }
         return 302 https://%s/login?rd=https://$host$request_uri;
     }
 
 `, authUpstream, authHost)
+}
+
+// sirAuthMapsConf is the http-context file 00-sir-auth.conf. Every server block
+// uses its variables, so it's written on every regeneration, even with no
+// gated routes or AUTH_ENABLED=false.
+const sirAuthMapsConf = `map $http_authorization $sir_pat {
+    "~*^Bearer\s+sirpat_" 1;
+    default "";
+}
+
+# sirpat tokens are for sir-auth only; any other Authorization passes through.
+map $http_authorization $sir_backend_auth {
+    "~*^Bearer\s+sirpat_" "";
+    default $http_authorization;
+}
+
+map $http_cf_connecting_ip $sir_client_ip {
+    "" $remote_addr;
+    default $http_cf_connecting_ip;
+}
+`
+
+// writeBaseConfs removes every stale *.conf in dir and rewrites the files that
+// must always exist: default.conf and the auth maps.
+func writeBaseConfs(dir string) {
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.conf"))
+	for _, f := range matches {
+		os.Remove(f) //nolint:errcheck
+	}
+	os.WriteFile(filepath.Join(dir, "default.conf"), []byte(defaultConf), 0644)         //nolint:errcheck
+	os.WriteFile(filepath.Join(dir, "00-sir-auth.conf"), []byte(sirAuthMapsConf), 0644) //nolint:errcheck
 }
 
 const authGateDirectives = `        auth_request /_sir_auth;
@@ -97,15 +137,17 @@ const authGateDirectives = `        auth_request /_sir_auth;
 `
 
 // authHeaders forwards verified identity to gated backends and strips it for
-// public ones — either way a client-supplied X-Auth-* never reaches a backend.
+// public ones — either way a client-supplied X-Auth-* never reaches a backend,
+// and neither does a sirpat token.
 func authHeaders(gated bool) string {
+	const noPAT = "        proxy_set_header Authorization $sir_backend_auth;\n"
 	if gated {
-		return `        proxy_set_header X-Auth-User-Id $sir_auth_user_id;
+		return noPAT + `        proxy_set_header X-Auth-User-Id $sir_auth_user_id;
         proxy_set_header X-Auth-Email $sir_auth_email;
         proxy_set_header X-Auth-Role $sir_auth_role;
 `
 	}
-	return `        proxy_set_header X-Auth-User-Id "";
+	return noPAT + `        proxy_set_header X-Auth-User-Id "";
         proxy_set_header X-Auth-Email "";
         proxy_set_header X-Auth-Role "";
 `
@@ -121,7 +163,12 @@ server {
     server_name {{.Hostname}};
     {{if .MaxBodySize}}client_max_body_size {{.MaxBodySize}};{{end}}
 
-{{if .Gated}}{{.AuthServer}}{{end}}    location / {
+{{if .Gated}}{{.AuthServer}}{{end}}{{if .IsAuthHost}}    # nginx calls verify directly on sir-auth; never from outside.
+    location = /session/verify {
+        return 404;
+    }
+
+{{end}}    location / {
 {{if .Gated}}{{.AuthGate}}{{end}}{{.AuthHeaders}}        proxy_pass http://{{.Name}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -375,7 +422,8 @@ func renderHostConf(d confData) (string, error) {
 	err := nginxConfTmpl.Execute(&buf, struct {
 		confData
 		AuthServer, AuthGate, AuthHeaders string
-	}{d, authServerBlock(), authGateDirectives, authHeaders(d.Gated)})
+		IsAuthHost                        bool
+	}{d, authServerBlock(), authGateDirectives, authHeaders(d.Gated), d.Hostname == authHost})
 	return buf.String(), err
 }
 
@@ -568,11 +616,7 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	matches, _ := filepath.Glob(filepath.Join(confDir, "*.conf"))
-	for _, f := range matches {
-		os.Remove(f) //nolint:errcheck
-	}
-	os.WriteFile(filepath.Join(confDir, "default.conf"), []byte(defaultConf), 0644) //nolint:errcheck
+	writeBaseConfs(confDir)
 	for name, conf := range confContents {
 		os.WriteFile(filepath.Join(confDir, name+".conf"), []byte(conf), 0644) //nolint:errcheck
 	}
