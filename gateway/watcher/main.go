@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -57,6 +58,7 @@ var nginxConfTmpl = template.Must(template.New("nginx").Parse(
 server {
     listen 80;
     server_name {{.Hostname}};
+    {{if .MaxBodySize}}client_max_body_size {{.MaxBodySize}};{{end}}
 
     location / {
         proxy_pass http://{{.Name}};
@@ -297,7 +299,7 @@ func reloadNginx(ctx context.Context, cli *client.Client) {
 }
 
 type confData struct {
-	Name, IP, Port, Hostname string
+	Name, IP, Port, Hostname, MaxBodySize string
 }
 
 // renderInternalConf builds a single nginx server block for internalHost that
@@ -350,6 +352,16 @@ func internalIndexHTML(services []internalSvc) string {
 	}
 	b.WriteString("</body>\n</html>\n")
 	return b.String()
+}
+
+// Accept a bounded nginx size literal, never arbitrary configuration text.
+var bodySizePattern = regexp.MustCompile(`^[1-9][0-9]{0,8}[kKmM]?$`)
+
+func maxBodySize(value string) string {
+	if bodySizePattern.MatchString(value) {
+		return value
+	}
+	return ""
 }
 
 func generateConfigs(ctx context.Context, cli *client.Client) {
@@ -434,7 +446,7 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 		}
 
 		var buf bytes.Buffer
-		if err := nginxConfTmpl.Execute(&buf, confData{Name: name, IP: ip, Port: port, Hostname: hostname}); err != nil {
+		if err := nginxConfTmpl.Execute(&buf, confData{Name: name, IP: ip, Port: port, Hostname: hostname, MaxBodySize: maxBodySize(c.Labels["proxy.max_body_size"])}); err != nil {
 			log.Printf("[ERROR] Template error for %s: %v", name, err)
 			continue
 		}

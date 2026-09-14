@@ -132,3 +132,10 @@ docker compose build sir-watcher
 - Go 1.26
 - [Docker SDK v28](https://pkg.go.dev/github.com/docker/docker)
 - single binary, no runtime dependencies
+
+### Per-service upload limit
+
+Set `proxy.max_body_size: "51m"` to allow a 50 MiB file plus multipart framing.
+This only changes that virtual host. Without the label nginx keeps its default.
+Only positive integer sizes with an optional `k` or `m` suffix are accepted;
+invalid values are ignored. Application-level limits still apply.
