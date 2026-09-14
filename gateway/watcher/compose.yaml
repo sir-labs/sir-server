@@ -15,6 +15,9 @@ services:
       PROXY_NETWORK: sir-server_sir-net
       CONF_DIR: /etc/nginx/conf.d
       DASHBOARD_PORT: "8080"
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}          # "false" = kill switch, every route public
+      AUTH_HOST: auth.${DOMAIN:-sir-labs.com}      # never gated
+      AUTH_UPSTREAM: http://sir-auth:8080
     labels:
       proxy.enable: "true"
       proxy.host: proxy.${DOMAIN:-sir-labs.com}

@@ -48,7 +48,68 @@ var (
 	// as long as it's bound to more than just 127.0.0.1. Requires the nginx
 	// container to have `extra_hosts: ["host.docker.internal:host-gateway"]`.
 	internalTarget = getenv("INTERNAL_TARGET_HOST", "host.docker.internal")
+
+	// Login gate (nginx auth_request against sir-auth). Every route is gated
+	// unless its container sets proxy.auth=false; AUTH_ENABLED=false is a
+	// global kill switch. authHost itself is never gated.
+	authHost     = getenv("AUTH_HOST", "auth."+domain)
+	authUpstream = getenv("AUTH_UPSTREAM", "http://sir-auth:8080")
+	authEnabled  = getenv("AUTH_ENABLED", "true") != "false"
 )
+
+// isGated decides whether a route on hostname requires login.
+func isGated(labels map[string]string, hostname string) bool {
+	return authEnabled && hostname != authHost && labels["proxy.auth"] != "false"
+}
+
+// authServerBlock is added to any server block with at least one gated
+// location. proxy_pass uses a variable + resolver so nginx resolves sir-auth
+// per request instead of at config load: if sir-auth doesn't exist, `nginx -t`
+// still passes (public routes keep working) and gated routes fail closed (500).
+//
+// rd is the raw original URL and is deliberately the LAST query parameter:
+// stock nginx can't urlencode, so sir-auth must take everything after "rd="
+// verbatim as the redirect target.
+func authServerBlock() string {
+	return fmt.Sprintf(`    location = /_sir_auth {
+        internal;
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $sir_auth_upstream %s;
+        proxy_pass $sir_auth_upstream/session/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+
+    location @sir_login {
+        return 302 https://%s/login?rd=https://$host$request_uri;
+    }
+
+`, authUpstream, authHost)
+}
+
+const authGateDirectives = `        auth_request /_sir_auth;
+        auth_request_set $sir_auth_user_id $upstream_http_x_auth_user_id;
+        auth_request_set $sir_auth_email $upstream_http_x_auth_email;
+        auth_request_set $sir_auth_role $upstream_http_x_auth_role;
+        error_page 401 = @sir_login;
+`
+
+// authHeaders forwards verified identity to gated backends and strips it for
+// public ones — either way a client-supplied X-Auth-* never reaches a backend.
+func authHeaders(gated bool) string {
+	if gated {
+		return `        proxy_set_header X-Auth-User-Id $sir_auth_user_id;
+        proxy_set_header X-Auth-Email $sir_auth_email;
+        proxy_set_header X-Auth-Role $sir_auth_role;
+`
+	}
+	return `        proxy_set_header X-Auth-User-Id "";
+        proxy_set_header X-Auth-Email "";
+        proxy_set_header X-Auth-Role "";
+`
+}
 
 var nginxConfTmpl = template.Must(template.New("nginx").Parse(
 	`upstream {{.Name}} {
@@ -60,8 +121,8 @@ server {
     server_name {{.Hostname}};
     {{if .MaxBodySize}}client_max_body_size {{.MaxBodySize}};{{end}}
 
-    location / {
-        proxy_pass http://{{.Name}};
+{{if .Gated}}{{.AuthServer}}{{end}}    location / {
+{{if .Gated}}{{.AuthGate}}{{end}}{{.AuthHeaders}}        proxy_pass http://{{.Name}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -116,11 +177,13 @@ type route struct {
 	IP           string `json:"ip"`
 	Port         string `json:"port"`
 	RegisteredAt string `json:"registered_at"`
+	Auth         bool   `json:"auth"`
 }
 
 type internalSvc struct {
-	Name string
-	Port string
+	Name  string
+	Port  string
+	Gated bool
 }
 
 var (
@@ -154,15 +217,19 @@ func serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(list) == 0 {
 		fmt.Fprint(w, `  <p class="empty">No active routes.</p>`)
 	} else {
-		fmt.Fprint(w, "  <table><tr><th>Container</th><th>URL</th><th>Upstream</th><th>Registered</th></tr>")
+		fmt.Fprint(w, "  <table><tr><th>Container</th><th>URL</th><th>Upstream</th><th>Login</th><th>Registered</th></tr>")
 		for _, rt := range list {
 			name := html.EscapeString(rt.Name)
 			hostname := html.EscapeString(rt.Hostname)
 			ip := html.EscapeString(rt.IP)
 			port := html.EscapeString(rt.Port)
+			login := "public"
+			if rt.Auth {
+				login = "gated"
+			}
 			fmt.Fprintf(w,
-				"<tr><td>%s</td><td><a href=\"http://%s\" target=\"_blank\">%s</a></td><td>%s:%s</td><td>%s</td></tr>",
-				name, hostname, hostname, ip, port, rt.RegisteredAt,
+				"<tr><td>%s</td><td><a href=\"http://%s\" target=\"_blank\">%s</a></td><td>%s:%s</td><td>%s</td><td>%s</td></tr>",
+				name, hostname, hostname, ip, port, login, rt.RegisteredAt,
 			)
 		}
 		fmt.Fprint(w, "</table>")
@@ -300,6 +367,16 @@ func reloadNginx(ctx context.Context, cli *client.Client) {
 
 type confData struct {
 	Name, IP, Port, Hostname, MaxBodySize string
+	Gated                                 bool
+}
+
+func renderHostConf(d confData) (string, error) {
+	var buf bytes.Buffer
+	err := nginxConfTmpl.Execute(&buf, struct {
+		confData
+		AuthServer, AuthGate, AuthHeaders string
+	}{d, authServerBlock(), authGateDirectives, authHeaders(d.Gated)})
+	return buf.String(), err
 }
 
 // renderInternalConf builds a single nginx server block for internalHost that
@@ -308,11 +385,33 @@ func renderInternalConf(hostname string, services []internalSvc) string {
 	sort.Slice(services, func(i, j int) bool { return services[i].Port < services[j].Port })
 
 	var b strings.Builder
+	// The index page is always gated (when auth is on); each /{port}/ location
+	// follows its own container's proxy.auth label.
+	indexGated := authEnabled && hostname != authHost
 	fmt.Fprintf(&b, "server {\n    listen 80;\n    server_name %s;\n\n", hostname)
-	b.WriteString("    location = / {\n        root /etc/nginx/conf.d;\n        try_files /internal-index.html =404;\n        default_type text/html;\n        charset utf-8;\n    }\n\n")
+	if indexGated {
+		b.WriteString(authServerBlock())
+	} else {
+		for _, s := range services {
+			if s.Gated {
+				b.WriteString(authServerBlock())
+				break
+			}
+		}
+	}
+	b.WriteString("    location = / {\n")
+	if indexGated {
+		b.WriteString(authGateDirectives)
+	}
+	b.WriteString("        root /etc/nginx/conf.d;\n        try_files /internal-index.html =404;\n        default_type text/html;\n        charset utf-8;\n    }\n\n")
 	for _, s := range services {
 		fmt.Fprintf(&b, "    location = /%s {\n        return 301 /%s/;\n    }\n\n", s.Port, s.Port)
-		fmt.Fprintf(&b, "    location /%s/ {\n        proxy_pass http://%s:%s/;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n\n", s.Port, internalTarget, s.Port)
+		fmt.Fprintf(&b, "    location /%s/ {\n", s.Port)
+		if s.Gated {
+			b.WriteString(authGateDirectives)
+		}
+		b.WriteString(authHeaders(s.Gated))
+		fmt.Fprintf(&b, "        proxy_pass http://%s:%s/;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n\n", internalTarget, s.Port)
 	}
 	b.WriteString("}\n")
 	return b.String()
@@ -409,7 +508,8 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 			}
 
 			usedInternalPorts[port] = name
-			internalServices = append(internalServices, internalSvc{Name: name, Port: port})
+			gated := isGated(c.Labels, internalHost)
+			internalServices = append(internalServices, internalSvc{Name: name, Port: port, Gated: gated})
 			newRoutes[name] = route{
 				Name:         name,
 				Hostname:     internalHost,
@@ -417,6 +517,7 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 				IP:           internalTarget,
 				Port:         port,
 				RegisteredAt: time.Now().Format("15:04:05"),
+				Auth:         gated,
 			}
 			log.Printf("[INFO] Internal proxy: %s/%s/ -> %s:%s (host port, must be published)", internalHost, port, internalTarget, port)
 			continue
@@ -445,12 +546,13 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 			continue
 		}
 
-		var buf bytes.Buffer
-		if err := nginxConfTmpl.Execute(&buf, confData{Name: name, IP: ip, Port: port, Hostname: hostname, MaxBodySize: maxBodySize(c.Labels["proxy.max_body_size"])}); err != nil {
+		gated := isGated(c.Labels, hostname)
+		conf, err := renderHostConf(confData{Name: name, IP: ip, Port: port, Hostname: hostname, MaxBodySize: maxBodySize(c.Labels["proxy.max_body_size"]), Gated: gated})
+		if err != nil {
 			log.Printf("[ERROR] Template error for %s: %v", name, err)
 			continue
 		}
-		confContents[name] = buf.String()
+		confContents[name] = conf
 		newRoutes[name] = route{
 			Name:         name,
 			Hostname:     hostname,
@@ -458,6 +560,7 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 			IP:           ip,
 			Port:         port,
 			RegisteredAt: time.Now().Format("15:04:05"),
+			Auth:         gated,
 		}
 		log.Printf("[INFO] Proxy: %s -> %s:%s", hostname, ip, port)
 	}

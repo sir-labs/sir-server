@@ -85,6 +85,7 @@ New services should follow the same pattern: `<group>/<service>/compose.yaml`.
 
    Own subdomain:
    - `proxy.enable` is the only required label.
+   - Login gate (both modes): every route requires sir-auth login by default; set `proxy.auth: "false"` to make it public. Gated apps receive the user in `X-Auth-Email` / `X-Auth-User-Id` / `X-Auth-Role` headers (never trust these on public routes — nginx strips them there).
    - `proxy.port` must match the port the container listens on internally — **not** a host-published port.
    - Do **not** add `ports:` mapping — the reverse proxy reaches it via the Docker network.
    - Do **not** add `networks:` — the watcher auto-connects the container.

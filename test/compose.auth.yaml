@@ -1,0 +1,21 @@
+# Case: login gate (proxy.auth). Needs sir-auth running on sir-net.
+# Expected: gated.sir-labs.com without sir_session cookie → 302 to
+#   https://auth.sir-labs.com/login?rd=https://gated.sir-labs.com/...
+#   with a valid cookie → 200 and whoami shows X-Auth-Email / X-Auth-User-Id / X-Auth-Role
+# public.sir-labs.com → 200 always; a client-sent X-Auth-Email is stripped (not shown by whoami)
+# If sir-auth is down: gated → 500, public → still 200
+services:
+  gated:
+    image: traefik/whoami
+    container_name: gated
+    labels:
+      proxy.enable: "true"
+    restart: unless-stopped
+
+  public:
+    image: traefik/whoami
+    container_name: public
+    labels:
+      proxy.enable: "true"
+      proxy.auth: "false"
+    restart: unless-stopped

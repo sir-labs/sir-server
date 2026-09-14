@@ -26,6 +26,7 @@ traffic จริงๆ ไหล: `cloudflared → nginx → backend container`
 | `proxy.enable=true` | required | opt-in สำหรับ container นี้ |
 | `proxy.port=8080` | `80` | port ของ container |
 | `proxy.host=foo.example.com` | `{name}.{DOMAIN}` | custom hostname |
+| `proxy.auth=false` | gated | ปิด login gate — route นี้เป็น public (ดู [Login gate](#login-gate)) |
 
 ตัวอย่าง:
 
@@ -98,6 +99,28 @@ regeneration (triggered by the container's `start`/`die` events and by
 `health_status` transitions). Containers without a healthcheck are always
 considered healthy, same as before this existed.
 
+### Login gate
+
+ทุก route **ต้อง login ก่อนโดย default** (nginx `auth_request` ไปที่ `sir-auth`):
+
+- ถ้า request ไม่มี `sir_session` cookie ที่ valid → `GET {AUTH_UPSTREAM}/session/verify` ตอบ 401 → nginx redirect 302 ไป
+  `https://{AUTH_HOST}/login?rd=https://$host$request_uri`
+- ถ้า valid (200) → nginx ส่ง `X-Auth-User-Id`, `X-Auth-Email`, `X-Auth-Role` (ค่าที่ sir-auth ตอบกลับมา) ไปให้ backend
+  app อ่าน `X-Auth-Email` ได้เลย ไม่ต้องทำ auth เอง
+- `proxy.auth: "false"` → public; nginx **ลบ** `X-Auth-*` ที่ client ส่งมาทิ้ง (spoof ไม่ได้ทั้ง route gated และ public)
+- `AUTH_HOST` (`auth.{DOMAIN}`) ไม่ถูก gate เสมอ ไม่ว่า label จะเป็นอะไร; `AUTH_ENABLED=false` ปิด gate ทั้งระบบ (kill switch)
+- `internal.{DOMAIN}`: gate ทีละ location ตาม label ของแต่ละ service; หน้า index `/` gate เสมอ
+  (`/{port}` ไม่มี slash ที่ 301 ไป `/{port}/` ไม่ถูก gate โดยตั้งใจ — ปลายทาง gate อยู่แล้ว รั่วแค่ว่ามี port นี้)
+- nginx ไม่ intercept 401 ของ backend เอง (`proxy_intercept_errors` off) — redirect ไป login เกิดเฉพาะ 401 จาก `/session/verify`
+
+**รูปแบบ `rd`:** stock nginx urlencode ไม่ได้ `rd` จึงเป็น URL ดิบ (`$request_uri` ตามที่ client ส่งมา) และเป็น
+query parameter **ตัวสุดท้ายเสมอ** — sir-auth ต้องเอา **ทุกอย่างหลัง `rd=`** เป็นค่า redirect (อย่า parse ด้วย
+`&` ปกติ เพราะ `?a=1&b=2` ของ URL เดิมจะหลุด) และต้อง validate ว่า host เป็น `*.{DOMAIN}` ก่อน redirect (กัน open redirect)
+
+**ถ้า sir-auth ล่ม/ไม่มี container:** `proxy_pass` ไป sir-auth ใช้ตัวแปร + `resolver 127.0.0.11` (Docker DNS) จึง
+resolve ตอน request ไม่ใช่ตอน load config → `nginx -t` ยังผ่าน route public ยังใช้ได้ ส่วน route ที่ gate จะ fail
+closed (500)
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -109,6 +132,9 @@ considered healthy, same as before this existed.
 | `DASHBOARD_PORT` | `8080` | port ของ dashboard HTTP server |
 | `INTERNAL_HOST` | `internal.{DOMAIN}` | reserved hostname สำหรับ shared path-based routing |
 | `INTERNAL_TARGET_HOST` | `host.docker.internal` | proxy target สำหรับ internal routing — ต้อง resolve ไปที่ Docker host จริง (ดู `extra_hosts` บน `sir-nginx`) |
+| `AUTH_ENABLED` | `true` | `false` = ปิด login gate ทุก route (kill switch) |
+| `AUTH_HOST` | `auth.{DOMAIN}` | host ของหน้า login — ไม่ถูก gate เสมอ |
+| `AUTH_UPSTREAM` | `http://sir-auth:8080` | sir-auth บน sir-net ที่ nginx เรียก `/session/verify` |
 
 ## Dashboard
 

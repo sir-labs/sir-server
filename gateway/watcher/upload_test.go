@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
@@ -18,12 +17,12 @@ func TestMaxBodySize(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"", "51m"} {
-		var output bytes.Buffer
-		if err := nginxConfTmpl.Execute(&output, confData{Name: "ocr", IP: "127.0.0.1", Port: "8000", Hostname: "ocr.example", MaxBodySize: value}); err != nil {
+		output, err := renderHostConf(confData{Name: "ocr", IP: "127.0.0.1", Port: "8000", Hostname: "ocr.example", MaxBodySize: value})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(output.String(), "client_max_body_size") != (value != "") {
-			t.Fatal(output.String())
+		if strings.Contains(output, "client_max_body_size") != (value != "") {
+			t.Fatal(output)
 		}
 	}
 }
