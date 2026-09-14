@@ -1,0 +1,14 @@
+services:
+  monitor:
+    networks:
+      - sir-net
+    labels:
+      proxy.enable: "true"
+      proxy.host: monitor.sir-labs.com
+      proxy.port: "19999"
+      proxy.auth: "true"
+
+networks:
+  sir-net:
+    name: sir-server_sir-net
+    external: true

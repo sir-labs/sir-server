@@ -1,0 +1,39 @@
+name: Deploy monitor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'service/monitor/**'
+      - '.github/workflows/deploy-monitor.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: sir-monitor-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, sir-labs]
+    defaults:
+      run:
+        working-directory: service/monitor
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify Docker and gateway network
+        run: |
+          docker info >/dev/null
+          docker network inspect sir-server_sir-net >/dev/null
+      - name: Validate
+        run: docker compose -f compose.yaml -f compose.sir.yaml config --quiet
+      - name: Pull
+        run: docker compose -f compose.yaml -f compose.sir.yaml pull --quiet
+      - name: Deploy
+        run: docker compose -f compose.yaml -f compose.sir.yaml up -d --remove-orphans --wait --wait-timeout 180
+      - name: Check authentication gate
+        run: |
+          status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: monitor.sir-labs.com' http://127.0.0.1/)
+          test "$status" = 302
+      - name: Prune unused images
+        if: always()
+        run: docker image prune -f

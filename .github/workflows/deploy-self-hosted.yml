@@ -3,6 +3,9 @@ name: Deploy
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'service/monitor/**'
+      - '.github/workflows/deploy-monitor.yml'
   workflow_dispatch:
 
 concurrency:
