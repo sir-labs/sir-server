@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>SIR · System status</title>
     <style>
+      [hidden] {
+        display: none !important;
+      }
       :root {
         color-scheme: dark;
         --bg: #0c111b;
@@ -414,6 +417,60 @@
           transition: border-color 0.15s;
         }
       }
+      .node-tabs {
+        display: flex;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      .node-tabs button[aria-selected="true"] {
+        border-color: var(--blue);
+        background: #21334b;
+      }
+      .log-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .log-controls label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+      }
+      .log-controls input[type="checkbox"] {
+        width: auto;
+      }
+      #log-search {
+        width: 220px;
+        max-width: 100%;
+      }
+      #log-output {
+        height: 360px;
+        overflow: auto;
+        background: #080e17;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        font:
+          12px/1.65 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 12px 0;
+      }
+      .log-line {
+        display: block;
+        color: #c8d6e8;
+      }
+      .log-line.stderr {
+        color: #f5b7a6;
+      }
+      #log-status {
+        font-size: 12px;
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
@@ -498,10 +555,86 @@
           และไม่ได้ยืนยันว่าแต่ละ hop ส่งข้อมูลสำเร็จ
           ดูผลตรวจเส้นทางจริงด้านล่าง
         </p>
+        <div
+          id="node-tabs"
+          class="node-tabs"
+          role="tablist"
+          aria-label="รายละเอียด service"
+          hidden
+        >
+          <button
+            id="overview-tab"
+            role="tab"
+            aria-selected="true"
+            aria-controls="detail"
+          >
+            Overview
+          </button>
+          <button
+            id="logs-tab"
+            role="tab"
+            aria-selected="false"
+            aria-controls="log-panel"
+          >
+            Logs
+          </button>
+        </div>
         <div id="detail" class="detail">
           <p>
             เลือก service จากแผนภาพหรือตารางเพื่อดู CPU, memory, healthcheck และ
             dependency
+          </p>
+        </div>
+        <div id="log-panel" class="detail" role="tabpanel" hidden>
+          <h3>Logs · <span id="log-name"></span></h3>
+          <p>stdout / stderr ของ container · ดูย้อนหลังและติดตามสด</p>
+          <div class="log-controls">
+            <label
+              >ย้อนหลัง
+              <select id="log-tail">
+                <option>100</option>
+                <option selected>200</option>
+                <option>500</option>
+                <option>1000</option>
+              </select>
+              บรรทัด</label
+            >
+            <label
+              >ช่วงเวลา
+              <select id="log-period">
+                <option value="all">ทั้งหมด</option>
+                <option value="15m">15 นาที</option>
+                <option value="1h">1 ชั่วโมง</option>
+                <option value="24h">24 ชั่วโมง</option>
+              </select></label
+            >
+            <button id="log-reload">โหลดใหม่</button
+            ><button id="log-live">หยุด Live</button>
+            <label
+              ><input
+                id="log-autoscroll"
+                type="checkbox"
+                checked
+              />เลื่อนอัตโนมัติ</label
+            >
+          </div>
+          <div class="log-controls">
+            <input
+              id="log-search"
+              placeholder="ค้นหาใน logs ที่โหลดแล้ว…"
+              aria-label="ค้นหา Logs"
+            /><select id="log-stream" aria-label="เลือก output">
+              <option value="all">stdout + stderr</option>
+              <option value="stdout">stdout / TTY</option>
+              <option value="stderr">stderr</option>
+            </select>
+          </div>
+          <div id="log-status" role="status">เลือก service เพื่อดู logs</div>
+          <pre id="log-output" aria-label="Container logs"></pre>
+          <p class="footnote">
+            แสดงสูงสุด 2,000 บรรทัด / 2 MiB ในหน้าจอ · Logs สำหรับ admin ·
+            กรองรูปแบบ credential ที่รู้จัก · ไฟล์ log ภายใน container
+            ที่ไม่ได้ส่ง stdout/stderr จะไม่แสดง
           </p>
         </div>
       </section>
@@ -716,7 +849,18 @@
           paths;
       }
       function select(name) {
+        const changed = selected !== name;
         selected = name;
+        $("node-tabs").hidden = false;
+        if (changed) {
+          stopLogs();
+          logEntries = [];
+          logKeys.clear();
+          logLast = "";
+          logBytes = 0;
+          if (logTab) startLogs(false);
+        }
+
         drawGraph();
         details();
       }
@@ -730,6 +874,193 @@
         $("detail").innerHTML =
           `<h3>${esc(n.name)} ${badge(n)}</h3><div class="detail-grid"><div><label>Container / healthcheck</label>${esc(n.state)} / ${esc(n.health)}</div><div><label>CPU / memory</label>${num(n.cpu_percent)}% / ${n.stats_ok ? bytes(n.memory_bytes) : "—"}</div><div><label>Restarts / processes</label>${n.restarts ?? "—"} / ${n.stats_ok ? n.pids : "—"}</div><div><label>Last inspected</label>${n.checked_at ? esc(new Date(n.checked_at).toLocaleTimeString()) : "—"}</div></div><p>${esc(n.reason)}</p><p>${deps.map((e) => esc(e.from) + " → " + esc(e.to) + " (" + esc(e.label) + ")").join("<br>") || "ไม่มี dependency ที่กำหนดไว้"}</p><p>${checks.map((c) => `<span class="${esc(c.status)}">${esc(c.name)}: ${esc(statusText[c.status])} · ${esc(c.detail)}</span>`).join("<br>") || "ยังไม่มี application probe สำหรับ service นี้"}</p>`;
       }
+      let logTab = false,
+        logFollow = true,
+        logController = null,
+        logTimer = null,
+        logSequence = 0;
+      let logEntries = [],
+        logKeys = new Set(),
+        logLast = "",
+        logBytes = 0,
+        logRenderPending = false;
+      function stopLogs() {
+        logSequence++;
+        if (logController) logController.abort();
+        logController = null;
+        clearTimeout(logTimer);
+        logTimer = null;
+      }
+      function showNodeTab(logs) {
+        logTab = logs;
+        $("detail").hidden = logs;
+        $("log-panel").hidden = !logs;
+        $("overview-tab").setAttribute("aria-selected", String(!logs));
+        $("logs-tab").setAttribute("aria-selected", String(logs));
+        if (logs) startLogs(false);
+        else stopLogs();
+      }
+      function renderLogs() {
+        logRenderPending = false;
+        const q = $("log-search").value.toLowerCase(),
+          stream = $("log-stream").value;
+        const shown = logEntries.filter(
+          (l) =>
+            l.text.toLowerCase().includes(q) &&
+            (stream === "all" ||
+              l.stream === stream ||
+              (stream === "stdout" && l.stream === "tty")),
+        );
+        const output = $("log-output"),
+          oldScroll = output.scrollTop,
+          fragment = document.createDocumentFragment();
+        for (const l of shown) {
+          const line = document.createElement("span");
+          line.className = "log-line " + l.stream;
+          line.textContent =
+            (l.time ? l.time + " " : "") + "[" + l.stream + "] " + l.text;
+          fragment.append(line);
+        }
+        output.replaceChildren(fragment);
+        output.scrollTop = $("log-autoscroll").checked
+          ? output.scrollHeight
+          : oldScroll;
+      }
+      function addLog(l) {
+        const key = l.time ? l.time + "|" + l.stream + "|" + l.text : null;
+        if (key && logKeys.has(key)) return;
+        if (key) logKeys.add(key);
+        logEntries.push({ ...l, key });
+        logBytes += l.text.length * 2;
+        if (l.time) logLast = l.time;
+        while (logEntries.length > 2000 || logBytes > 2 * 1024 * 1024) {
+          const old = logEntries.shift();
+          logBytes -= old.text.length * 2;
+          if (old.key) logKeys.delete(old.key);
+        }
+        if (!logRenderPending) {
+          logRenderPending = true;
+          requestAnimationFrame(renderLogs);
+        }
+      }
+      async function startLogs(resume) {
+        stopLogs();
+        if (!selected || !logTab) return;
+        const seq = logSequence;
+        const controller = new AbortController();
+        logController = controller;
+        if (!resume) {
+          logEntries = [];
+          logKeys.clear();
+          logLast = "";
+          logBytes = 0;
+          renderLogs();
+        }
+        $("log-name").textContent = selected;
+        $("log-live").textContent = logFollow ? "หยุด Live" : "เริ่ม Live";
+        $("log-status").textContent = resume
+          ? "กำลังเชื่อมต่อ Live อีกครั้ง…"
+          : "กำลังโหลด logs…";
+        const params = new URLSearchParams({
+          container: selected,
+          tail: $("log-tail").value,
+          period: $("log-period").value,
+          follow: logFollow ? "1" : "0",
+        });
+        const headers = {};
+        if (resume && logLast) headers["Last-Event-ID"] = logLast;
+        let ended = false;
+        try {
+          const response = await fetch("/api/logs?" + params, {
+            headers,
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            const messages = {
+              403: "ต้องใช้บัญชี admin ที่ล็อกอินผ่าน gateway",
+              404: "ไม่พบ container นี้ อาจถูกลบหรือสร้างใหม่",
+              429: "มีผู้เปิด logs เต็มจำนวน กรุณาลองใหม่",
+              501: "Logging driver ของ container นี้ไม่รองรับการอ่าน logs",
+              502: "Docker ไม่สามารถอ่าน logs ได้",
+            };
+            throw Error(
+              messages[response.status] ||
+                "โหลด logs ไม่สำเร็จ (HTTP " + response.status + ")",
+            );
+          }
+          if (
+            !response.headers.get("content-type")?.includes("text/event-stream")
+          )
+            throw Error("Session อาจหมดอายุ กรุณา login ใหม่");
+          const reader = response.body.getReader(),
+            decoder = new TextDecoder();
+          let pending = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (seq !== logSequence) return;
+            if (done) break;
+            pending += decoder.decode(value, { stream: true });
+            let end;
+            while ((end = pending.indexOf("\n\n")) >= 0) {
+              const block = pending.slice(0, end);
+              pending = pending.slice(end + 2);
+              let event = "",
+                payload = "";
+              for (const line of block.split("\n")) {
+                if (line.startsWith("event: ")) event = line.slice(7);
+                if (line.startsWith("data: ")) payload += line.slice(6);
+              }
+              if (!payload) continue;
+              const value = JSON.parse(payload);
+              if (event === "log") addLog(value);
+              if (event === "meta" || event === "heartbeat")
+                $("log-status").textContent =
+                  (logFollow ? "● Live · " : "ย้อนหลัง · ") +
+                  "เชื่อมต่อแล้ว · " +
+                  new Date().toLocaleTimeString();
+              if (event === "end") {
+                ended = true;
+                $("log-status").textContent = logEntries.length
+                  ? "แสดง logs ที่มีครบแล้ว · " + logEntries.length + " บรรทัด"
+                  : "ไม่มี logs ในช่วงเวลานี้";
+              }
+              if (event === "problem")
+                throw Error("การอ่าน logs ขาดช่วง กรุณาโหลดใหม่");
+            }
+          }
+          if (seq === logSequence && logFollow && !ended) {
+            logTimer = setTimeout(() => startLogs(true), 2000);
+          }
+        } catch (e) {
+          if (seq !== logSequence || e.name === "AbortError") return;
+          $("log-status").textContent = e.message;
+          if (e instanceof TypeError && logFollow) {
+            $("log-status").textContent =
+              "การเชื่อมต่อขาดช่วง กำลังลองเชื่อมต่อใหม่…";
+            logTimer = setTimeout(() => startLogs(true), 3000);
+          }
+        }
+      }
+      $("overview-tab").onclick = () => showNodeTab(false);
+      $("logs-tab").onclick = () => showNodeTab(true);
+      $("log-reload").onclick = () => startLogs(false);
+      $("log-tail").onchange = () => startLogs(false);
+      $("log-period").onchange = () => startLogs(false);
+      $("log-live").onclick = () => {
+        logFollow = !logFollow;
+        $("log-live").textContent = logFollow ? "หยุด Live" : "เริ่ม Live";
+        if (logFollow) startLogs(true);
+        else {
+          stopLogs();
+          $("log-status").textContent =
+            "หยุด Live แล้ว · ยังค้นหา logs ที่โหลดไว้ได้";
+        }
+      };
+      $("log-search").oninput = renderLogs;
+      $("log-stream").onchange = renderLogs;
+      $("log-autoscroll").onchange = renderLogs;
+      window.addEventListener("pagehide", stopLogs);
       function table() {
         if (!data) return;
         const q = $("search").value.toLowerCase(),

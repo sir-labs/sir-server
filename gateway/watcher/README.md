@@ -229,3 +229,27 @@ CI deploys only sir-watcher when a push changes only watcher files and this
 workflow. Other changes use the full Compose deployment without forced recreation.
 Both paths use the shared deployment lock and verify that the status API collects
 a nonempty snapshot.
+
+## Container logs
+
+Select a node and open **Logs** to read Docker stdout/stderr. Choose the last
+100/200/500/1000 lines and all retained logs or the last 15 minutes/1 hour/24 hours.
+Live mode streams new output over SSE; pause Live separately from auto-scroll.
+Search and stream filters apply to the buffered lines, capped at 2000 lines/2 MiB.
+Switching nodes or leaving the tab closes the Docker log reader. Stopped containers
+can still expose retained logs, subject to their Docker logging driver and rotation.
+
+`GET /api/logs?container=NAME&tail=200&period=all&follow=1` requires the real nginx
+peer (resolved through Docker DNS), a verified user ID and the admin role. It only
+accepts names in the monitored inventory. No exec, attach, stdin, file browsing or
+container mutation is implemented. Nginx buffering is disabled for this response.
+Connections rotate after 55 seconds and resume using the last Docker timestamp;
+the browser removes duplicates at the boundary. A new connection rechecks access.
+Eight viewers may connect concurrently. HTTP errors explain missing containers,
+unsupported log drivers and viewer limits without returning Docker error internals.
+
+Known credential patterns (sirpat, bearer, password/token/key assignments and URL
+userinfo) are redacted server-side after assembling complete lines. This is not a
+universal secret detector; access remains admin-only. ANSI/control characters are
+removed, oversized lines are omitted, and the UI inserts log text as text nodes.
+No log content or credentials are persisted by the dashboard itself.
