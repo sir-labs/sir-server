@@ -815,11 +815,26 @@
           }
           flow.append(lane);
         }
-        requestAnimationFrame(drawEdges);
+        scheduleEdges();
+      }
+      let edgeFrame = 0;
+      function scheduleEdges() {
+        cancelAnimationFrame(edgeFrame);
+        // The first frame applies the new grid height; the second measures it.
+        edgeFrame = requestAnimationFrame(() => {
+          edgeFrame = requestAnimationFrame(drawEdges);
+        });
       }
       function drawEdges() {
         if (!data) return;
-        const f = $("flow").getBoundingClientRect();
+        const flow = $("flow"),
+          svg = $("edges"),
+          f = flow.getBoundingClientRect();
+        // Path coordinates are calculated in CSS pixels. An SVG without a
+        // matching viewBox silently uses a 300×150 coordinate system and
+        // scales every endpoint/control point as the graph changes size.
+        svg.setAttribute("viewBox", `0 0 ${f.width} ${f.height}`);
+        svg.setAttribute("preserveAspectRatio", "none");
         let paths = "";
         for (const e of data.edges) {
           const a = [...document.querySelectorAll("[data-node]")].find(
@@ -835,16 +850,24 @@
             y1 = x.top + x.height / 2 - f.top,
             x2 = y.left - f.left,
             y2 = y.top + y.height / 2 - f.top;
-          if (Math.abs(x1 - x2) < 40) {
+          const sourceCenterX = x.left + x.width / 2,
+            targetCenterX = y.left + y.width / 2,
+            sameColumn =
+              Math.abs(sourceCenterX - targetCenterX) <
+              Math.min(x.width, y.width) / 2;
+          if (sameColumn) {
             x1 = x.left + x.width / 2 - f.left;
-            y1 = x.bottom - f.top;
+            y1 = (x.top < y.top ? x.bottom : x.top) - f.top;
             x2 = y.left + y.width / 2 - f.left;
-            y2 = y.top - f.top;
+            y2 = (x.top < y.top ? y.top : y.bottom) - f.top;
+          } else if (sourceCenterX > targetCenterX) {
+            x1 = x.left - f.left;
+            x2 = y.right - f.left;
           }
           const active = selected && (e.from === selected || e.to === selected);
-          paths += `<path d="M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}" fill="none" stroke="${active ? "#7db7ff" : "#43566f"}" stroke-width="${active ? 2 : 1.2}" stroke-dasharray="4 4" marker-end="url(#arrow)"><title>${esc(e.label)}</title></path>`;
+          paths += `<path data-from="${esc(e.from)}" data-to="${esc(e.to)}" d="M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}" fill="none" stroke="${active ? "#7db7ff" : "#43566f"}" stroke-width="${active ? 2 : 1.2}" stroke-dasharray="4 4" marker-end="url(#arrow)"><title>${esc(e.label)}</title></path>`;
         }
-        $("edges").innerHTML =
+        svg.innerHTML =
           '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#6f849e"/></marker></defs>' +
           paths;
       }
@@ -1184,7 +1207,8 @@
       $("refresh").onclick = refresh;
       $("search").oninput = table;
       $("filter").onchange = table;
-      window.addEventListener("resize", drawEdges);
+      window.addEventListener("resize", scheduleEdges);
+      new ResizeObserver(scheduleEdges).observe($("flow"));
       setInterval(refresh, 10000);
       setInterval(freshness, 1000);
       refresh();
