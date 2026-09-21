@@ -239,6 +239,15 @@ var (
 )
 
 func serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/logs" {
+		if liveLogs == nil {
+			http.Error(w, "Logs unavailable", 503)
+			return
+		}
+		liveLogs.serve(w, r)
+		return
+	}
+
 	if r.URL.Path == "/api/status" {
 		liveMonitor.serve(w, r)
 		return
@@ -723,6 +732,7 @@ func main() {
 
 	ctx := context.Background()
 
+	liveLogs = &logService{docker: cli, authorize: authorizeLogs, known: knownLogContainer, slots: make(chan struct{}, 8)}
 	http.HandleFunc("/", serveHTTP)
 	go func() {
 		log.Printf("[INFO] Dashboard on port %s", dashboardPort)
