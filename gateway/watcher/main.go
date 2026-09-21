@@ -239,6 +239,26 @@ var (
 )
 
 func serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/status" {
+		liveMonitor.serve(w, r)
+		return
+	}
+	if r.URL.Path == "/healthz" {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"ok"}`)
+		return
+	}
+	if r.URL.Path == "/" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(statusPage)
+		return
+	}
+	if r.URL.Path != "/routes" && r.URL.Path != "/routes/view" {
+		http.NotFound(w, r)
+		return
+	}
+
 	if r.URL.Path == "/routes" {
 		mu.RLock()
 		data := make([]route, 0, len(routes))
@@ -711,6 +731,11 @@ func main() {
 		}
 	}()
 
+	if os.Getenv("MONITOR_ONLY") == "true" {
+		liveMonitor.run(ctx, cli)
+		return
+	}
 	generateConfigs(ctx, cli)
+	go liveMonitor.run(ctx, cli)
 	watchEvents(ctx, cli)
 }

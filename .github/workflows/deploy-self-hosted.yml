@@ -20,6 +20,25 @@ jobs:
       # submodules is a private GitLab repo the runner can't clone. Deploy
       # the services in services.yaml from their own repos instead.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select deployment scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PYTHON'
+          import os, subprocess
+          before = os.environ.get('BEFORE_SHA', '')
+          diff = subprocess.run(['git', 'diff', '--name-only', before, 'HEAD'], text=True, capture_output=True) if before and set(before) != {'0'} else None
+          paths = diff.stdout.splitlines() if diff is not None and diff.returncode == 0 else []
+          watcher_only = bool(paths) and os.environ['EVENT_NAME'] == 'push' and all(
+              p.startswith('gateway/watcher/') or p == '.github/workflows/deploy-self-hosted.yml'
+              for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'watcher_only={str(watcher_only).lower()}\n')
+          PYTHON
       - name: Verify Docker access
         run: docker info >/dev/null
       - name: Validate
@@ -29,13 +48,39 @@ jobs:
       # through it) down for seconds instead of minutes.
       - name: Pull and build images
         run: |
-          docker compose pull --ignore-buildable --quiet
-          docker compose build
+          if [ "${{ steps.scope.outputs.watcher_only }}" = "true" ]; then
+            docker compose build sir-watcher
+          else
+            docker compose pull --ignore-buildable --quiet
+            docker compose build
+          fi
       # Recreating the gateway drops the runner's own long-poll to GitHub
       # (SocketException 125), so the NEXT queued job waits out a reconnect
       # backoff. The job doing the deploying still finishes fine.
       - name: Deploy
-        run: docker compose up -d --remove-orphans --force-recreate --wait
+        run: |
+          if [ "${{ steps.scope.outputs.watcher_only }}" = "true" ]; then
+            flock --wait 600 /tmp/sir-deploy.lock docker compose up -d --no-deps --no-build --wait sir-watcher
+          else
+            flock --wait 600 /tmp/sir-deploy.lock docker compose up -d --no-build --remove-orphans --wait
+          fi
+      - name: Verify status API
+        run: |
+          python3 - <<'PYTHON'
+          import json, time, urllib.request
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8080/api/status', timeout=3) as r:
+                      snapshot = json.load(r)
+                  if snapshot.get('sampled_at') and snapshot.get('nodes') and len(snapshot.get('checks', [])) == 4:
+                      print('Status API is collecting nodes and application checks')
+                      break
+              except (OSError, ValueError):
+                  pass
+              time.sleep(2)
+          else:
+              raise SystemExit('Status API failed to produce a monitoring snapshot')
+          PYTHON
       - name: Prune unused images
         if: always()
-        run: docker image prune -f
+        run: flock --wait 600 /tmp/sir-deploy.lock docker image prune -f

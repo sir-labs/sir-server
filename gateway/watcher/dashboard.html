@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SIR · System status</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0c111b;
+        --panel: #121b28;
+        --line: #263448;
+        --ink: #e4edf7;
+        --muted: #95a8bf;
+        --good: #52d6ad;
+        --bad: #ff7d87;
+        --warn: #f3c56b;
+        --blue: #7db7ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.6 system-ui,
+          sans-serif;
+      }
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+      button,
+      select,
+      input {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #172334;
+        color: var(--ink);
+        padding: 8px 12px;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--blue);
+      }
+      button:focus-visible,
+      a:focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 3px;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        padding: 22px max(24px, calc((100vw - 1500px) / 2));
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+      }
+      header strong {
+        font-size: 21px;
+        letter-spacing: -0.5px;
+      }
+      header small {
+        display: block;
+        color: var(--muted);
+      }
+      nav {
+        display: flex;
+        gap: 18px;
+        align-items: center;
+      }
+      main {
+        max-width: 1548px;
+        margin: auto;
+        padding: 24px;
+      }
+      .eyebrow {
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 700;
+      }
+      h1 {
+        font-size: 32px;
+        letter-spacing: -1px;
+        margin: 3px 0 8px;
+      }
+      h2 {
+        font-size: 19px;
+        margin: 0;
+      }
+      p {
+        margin: 4px 0;
+        color: var(--muted);
+      }
+      .topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .fresh {
+        font-size: 12px;
+        color: var(--muted);
+        text-align: right;
+      }
+      .banner {
+        border: 1px solid var(--warn);
+        background: #30281b;
+        color: var(--warn);
+        padding: 12px 16px;
+        margin: 16px 0;
+        border-radius: 10px;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+        margin: 24px 0;
+      }
+      .metric {
+        padding: 17px 20px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+      }
+      .metric label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 28px;
+        letter-spacing: -1px;
+        font-weight: 600;
+      }
+      .metric small {
+        color: var(--muted);
+      }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .legend {
+        display: flex;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        margin-right: 6px;
+      }
+      .healthy,
+      .passed {
+        color: var(--good);
+      }
+      .degraded,
+      .failed,
+      .down {
+        color: var(--bad);
+      }
+      .starting {
+        color: var(--warn);
+      }
+      .unknown {
+        color: var(--muted);
+      }
+      .flow-scroll {
+        overflow: auto;
+        padding-bottom: 8px;
+      }
+      .flow {
+        position: relative;
+        min-width: 1060px;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 36px;
+        padding: 12px 6px;
+      }
+      .flow svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      .lane {
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .lane-title {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 2px;
+      }
+      .node {
+        text-align: left;
+        width: 100%;
+        min-height: 102px;
+        padding: 13px;
+        border: 1px solid var(--line);
+        border-left: 3px solid currentColor;
+        background: #162130;
+        border-radius: 10px;
+        box-shadow: 0 5px 14px #0002;
+      }
+      .node b {
+        display: block;
+        font-size: 13px;
+        color: var(--ink);
+        margin-bottom: 3px;
+      }
+      .node small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .node .state {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .node.selected {
+        outline: 2px solid var(--blue);
+      }
+      .probe-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .probe {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        background: #111a27;
+      }
+      .probe strong {
+        display: block;
+        color: var(--ink);
+        font-size: 12px;
+      }
+      .probe span {
+        font-size: 12px;
+      }
+      .probe small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .detail {
+        margin-top: 16px;
+        padding: 16px;
+        background: #0c1420;
+        border-radius: 10px;
+        min-height: 65px;
+      }
+      .detail h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+      }
+      .detail label {
+        color: var(--muted);
+        font-size: 11px;
+        display: block;
+      }
+      .detail p {
+        font-size: 12px;
+        margin-top: 10px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+      }
+      input {
+        width: 230px;
+      }
+      .table-scroll {
+        overflow: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      th {
+        text-align: left;
+        color: var(--muted);
+        font-weight: 500;
+        padding: 11px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      td {
+        padding: 12px 10px;
+        border-bottom: 1px solid #202c3e;
+      }
+      tr:last-child td {
+        border: 0;
+      }
+      td button {
+        padding: 0;
+        background: none;
+        border: 0;
+        text-align: left;
+      }
+      td small {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .pill {
+        border: 1px solid currentColor;
+        border-radius: 20px;
+        padding: 2px 8px;
+        font-size: 10px;
+        display: inline-block;
+      }
+      .footnote {
+        font-size: 11px;
+        margin-top: 14px;
+      }
+      .empty {
+        padding: 25px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .stale .flow,
+      .stale .probe-grid,
+      .stale tbody {
+        opacity: 0.45;
+      }
+      .stale .node,
+      .stale .pill,
+      .stale .probe {
+        color: var(--muted);
+      }
+      @media (max-width: 900px) {
+        .summary {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .probe-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .section-head,
+        .topline {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .detail-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .legend {
+          flex-wrap: wrap;
+        }
+        .toolbar {
+          width: 100%;
+        }
+        input {
+          width: 100%;
+        }
+        header {
+          padding: 16px;
+          flex-wrap: wrap;
+        }
+        main {
+          padding: 16px;
+        }
+        h1 {
+          font-size: 26px;
+        }
+        .fresh {
+          text-align: left;
+        }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        button {
+          transition: border-color 0.15s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <strong>SIR<span style="color: var(--blue)"> / </span>Operations</strong
+        ><small>Service health & data flow</small>
+      </div>
+      <nav>
+        <a href="/routes/view">Routes</a
+        ><a
+          id="netdata"
+          href="https://monitor.sir-labs.com"
+          target="_blank"
+          rel="noopener"
+          >Host metrics ↗</a
+        ><button id="refresh">Refresh</button>
+      </nav>
+    </header>
+    <main>
+      <div class="topline">
+        <div>
+          <div class="eyebrow">Live infrastructure</div>
+          <h1>ระบบทำงานถึงจุดไหนแล้ว?</h1>
+          <p>ดูสถานะของแต่ละ service และตรวจเส้นทางที่ผู้ใช้เรียกจริง</p>
+        </div>
+        <div class="fresh">
+          <div id="fresh">กำลังโหลดสถานะ…</div>
+          <div>เก็บข้อมูลประมาณทุก 10–20 วินาที</div>
+        </div>
+      </div>
+      <div id="banner" class="banner" role="status" hidden></div>
+      <div class="summary">
+        <div class="metric">
+          <label>HEALTHY</label><strong id="healthy">—</strong
+          ><small>Docker healthcheck ผ่าน</small>
+        </div>
+        <div class="metric">
+          <label>STOPPED / FAILED</label><strong id="issues">—</strong
+          ><small>รวม container ที่หยุดไว้แล้ว</small>
+        </div>
+        <div class="metric">
+          <label>NOT VERIFIED</label><strong id="unknown">—</strong
+          ><small>ยังไม่มี healthcheck / กำลังเริ่ม</small>
+        </div>
+        <div class="metric">
+          <label>HOST CPU</label><strong id="cpu">—</strong
+          ><small id="cpunote">100% = 1 CPU core</small>
+        </div>
+        <div class="metric">
+          <label>HOST MEMORY</label><strong id="memory">—</strong
+          ><small id="memnote">Netdata</small>
+        </div>
+        <div class="metric">
+          <label>ROOT DISK FREE</label><strong id="disk">—</strong
+          ><small id="disknote">Netdata · /</small>
+        </div>
+      </div>
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Service flow</h2>
+            <p>กด node เพื่อดูรายละเอียด · เลื่อนแนวนอนเพื่อดูแผนภาพบนมือถือ</p>
+          </div>
+          <select id="flowScope" aria-label="ขอบเขตแผนภาพ">
+            <option value="core">OCR & authentication</option>
+            <option value="all">ทุก service</option>
+          </select>
+          <div class="legend">
+            <span class="healthy"><i class="dot"></i>Healthy</span
+            ><span class="degraded"><i class="dot"></i>Problem</span
+            ><span class="unknown"><i class="dot"></i>Not verified</span>
+          </div>
+        </div>
+        <div class="flow-scroll">
+          <div id="flow" class="flow">
+            <svg id="edges" aria-hidden="true"></svg>
+          </div>
+        </div>
+        <p class="footnote">
+          เส้นแสดง dependency ที่กำหนดไว้ ไม่ใช่ live traffic tracing
+          และไม่ได้ยืนยันว่าแต่ละ hop ส่งข้อมูลสำเร็จ
+          ดูผลตรวจเส้นทางจริงด้านล่าง
+        </p>
+        <div id="detail" class="detail">
+          <p>
+            เลือก service จากแผนภาพหรือตารางเพื่อดู CPU, memory, healthcheck และ
+            dependency
+          </p>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Live path checks</h2>
+            <p>ตรวจแยกจาก Docker healthcheck · ไม่สร้างงาน OCR ใหม่</p>
+          </div>
+          <span class="eyebrow">Authenticated probes</span>
+        </div>
+        <div id="checks" class="probe-grid"></div>
+      </section>
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>
+              All services <span id="count" style="color: var(--muted)"></span>
+            </h2>
+            <p>รวม service ที่ไม่มี public route และ container ที่หยุดทำงาน</p>
+          </div>
+          <div class="toolbar">
+            <input
+              id="search"
+              aria-label="ค้นหา service"
+              placeholder="ค้นหา service / project…"
+            /><select id="filter" aria-label="กรองสถานะ">
+              <option value="all">ทุกสถานะ</option>
+              <option value="problem">มีปัญหา</option>
+              <option value="unknown">ยังไม่ยืนยัน</option>
+              <option value="healthy">Healthy</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Service / project</th>
+                <th>Health</th>
+                <th>CPU</th>
+                <th>Memory / limit</th>
+                <th>Network ↓ / ↑</th>
+                <th>Restarts</th>
+                <th>Uptime</th>
+                <th>Route</th>
+              </tr>
+            </thead>
+            <tbody id="services"></tbody>
+          </table>
+        </div>
+        <p class="footnote">
+          CPU / memory เป็นผลรวม container ที่เก็บได้ ไม่ใช่การใช้งานทั้ง host ·
+          ตัวเลข — หมายถึงยังไม่มี sample · container ที่ถูกลบจะเก็บสถานะ
+          Missing จน watcher restart · ดูสถิติ host เพิ่มเติมและประวัติใน Host
+          metrics
+        </p>
+      </section>
+    </main>
+    <script>
+      "use strict";
+      let data = null,
+        selected = "",
+        loading = false,
+        fetchFailed = false;
+      const $ = (id) => document.getElementById(id),
+        esc = (v) =>
+          String(v ?? "").replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          );
+      const statusText = {
+        healthy: "Healthy",
+        degraded: "Unhealthy",
+        down: "Down",
+        unknown: "Not verified",
+        starting: "Starting",
+        passed: "Passed",
+        failed: "Failed",
+      };
+      const bytes = (v) => {
+          if (v == null) return "—";
+          let n = Number(v),
+            i = 0;
+          while (n >= 1024 && i < 4) {
+            n /= 1024;
+            i++;
+          }
+          return (
+            n.toFixed(i ? 1 : 0) + " " + ["B", "KiB", "MiB", "GiB", "TiB"][i]
+          );
+        },
+        num = (v) => (v == null ? "—" : Number(v).toFixed(1)),
+        age = (v) => {
+          const t = Date.parse(v);
+          if (!t || t < 0) return "—";
+          let s = Math.max(0, (Date.now() - t) / 1000);
+          return s >= 86400
+            ? Math.floor(s / 86400) +
+                "d " +
+                Math.floor((s % 86400) / 3600) +
+                "h"
+            : s >= 3600
+              ? Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m"
+              : Math.floor(s / 60) + "m";
+        },
+        badge = (n) =>
+          `<span class="pill ${esc(n.status)}">${esc(statusText[n.status] || n.status)}</span>`;
+      const core = [
+        ["Ingress", [["cloudflared", "Cloudflare Tunnel"]]],
+        ["Gateway", [["sir-nginx", "nginx Gateway"]]],
+        [
+          "Identity / applications",
+          [
+            ["sir-auth", "Authentication"],
+            ["sir-mcp-mcp-1", "MCP"],
+            ["sir-ocr-api-1", "OCR API"],
+          ],
+        ],
+        [
+          "Storage / queue",
+          [
+            ["sir-auth-sir-auth-db-1", "PostgreSQL"],
+            ["sir-ocr-rabbitmq-1", "RabbitMQ"],
+          ],
+        ],
+        [
+          "Processing",
+          [
+            ["sir-ocr-worker-1", "OCR Worker"],
+            ["sir-watcher", "Status collector"],
+          ],
+        ],
+      ];
+      function find(name) {
+        return (
+          data.nodes.find((n) => n.name === name) || {
+            name,
+            status: "unknown",
+            reason: "Not observed",
+            health: "unknown",
+            state: "unknown",
+          }
+        );
+      }
+      function drawGraph() {
+        const flow = $("flow");
+        flow.querySelectorAll(".lane").forEach((e) => e.remove());
+        const lanes = core.map(([t, ns]) => [t, [...ns]]);
+        if ($("flowScope").value === "all") {
+          const known = new Set(core.flatMap((l) => l[1].map((n) => n[0])));
+          lanes[2][1].push(
+            ...data.nodes
+              .filter((n) => !known.has(n.name))
+              .map((n) => [n.name, n.name]),
+          );
+        }
+        for (const [title, nodes] of lanes) {
+          let lane = document.createElement("div");
+          lane.className = "lane";
+          lane.innerHTML = `<div class="lane-title">${esc(title)}</div>`;
+          for (const [id, label] of nodes) {
+            const n = find(id),
+              btn = document.createElement("button");
+            btn.className =
+              "node " + n.status + (id === selected ? " selected" : "");
+            btn.dataset.node = id;
+            btn.innerHTML = `<b>${esc(label)}</b><span class="state"><i class="dot"></i>${esc(statusText[n.status])}</span><small>${n.stats_ok ? "CPU " + num(n.cpu_percent) + "% · " + bytes(n.memory_bytes) : esc(n.reason)}</small>`;
+            btn.onclick = () => select(id);
+            lane.append(btn);
+          }
+          flow.append(lane);
+        }
+        requestAnimationFrame(drawEdges);
+      }
+      function drawEdges() {
+        if (!data) return;
+        const f = $("flow").getBoundingClientRect();
+        let paths = "";
+        for (const e of data.edges) {
+          const a = [...document.querySelectorAll("[data-node]")].find(
+              (n) => n.dataset.node === e.from,
+            ),
+            b = [...document.querySelectorAll("[data-node]")].find(
+              (n) => n.dataset.node === e.to,
+            );
+          if (!a || !b) continue;
+          let x = a.getBoundingClientRect(),
+            y = b.getBoundingClientRect(),
+            x1 = x.right - f.left,
+            y1 = x.top + x.height / 2 - f.top,
+            x2 = y.left - f.left,
+            y2 = y.top + y.height / 2 - f.top;
+          if (Math.abs(x1 - x2) < 40) {
+            x1 = x.left + x.width / 2 - f.left;
+            y1 = x.bottom - f.top;
+            x2 = y.left + y.width / 2 - f.left;
+            y2 = y.top - f.top;
+          }
+          const active = selected && (e.from === selected || e.to === selected);
+          paths += `<path d="M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}" fill="none" stroke="${active ? "#7db7ff" : "#43566f"}" stroke-width="${active ? 2 : 1.2}" stroke-dasharray="4 4" marker-end="url(#arrow)"><title>${esc(e.label)}</title></path>`;
+        }
+        $("edges").innerHTML =
+          '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#6f849e"/></marker></defs>' +
+          paths;
+      }
+      function select(name) {
+        selected = name;
+        drawGraph();
+        details();
+      }
+      function details() {
+        if (!selected || !data) return;
+        let n = find(selected),
+          deps = data.edges.filter(
+            (e) => e.from === selected || e.to === selected,
+          ),
+          checks = data.checks.filter((c) => c.nodes.includes(selected));
+        $("detail").innerHTML =
+          `<h3>${esc(n.name)} ${badge(n)}</h3><div class="detail-grid"><div><label>Container / healthcheck</label>${esc(n.state)} / ${esc(n.health)}</div><div><label>CPU / memory</label>${num(n.cpu_percent)}% / ${n.stats_ok ? bytes(n.memory_bytes) : "—"}</div><div><label>Restarts / processes</label>${n.restarts ?? "—"} / ${n.stats_ok ? n.pids : "—"}</div><div><label>Last inspected</label>${n.checked_at ? esc(new Date(n.checked_at).toLocaleTimeString()) : "—"}</div></div><p>${esc(n.reason)}</p><p>${deps.map((e) => esc(e.from) + " → " + esc(e.to) + " (" + esc(e.label) + ")").join("<br>") || "ไม่มี dependency ที่กำหนดไว้"}</p><p>${checks.map((c) => `<span class="${esc(c.status)}">${esc(c.name)}: ${esc(statusText[c.status])} · ${esc(c.detail)}</span>`).join("<br>") || "ยังไม่มี application probe สำหรับ service นี้"}</p>`;
+      }
+      function table() {
+        if (!data) return;
+        const q = $("search").value.toLowerCase(),
+          filter = $("filter").value,
+          rows = data.nodes.filter(
+            (n) =>
+              (n.name + " " + n.project).toLowerCase().includes(q) &&
+              (filter === "all" ||
+                (filter === "problem"
+                  ? ["down", "degraded"].includes(n.status)
+                  : filter === "unknown"
+                    ? ["unknown", "starting"].includes(n.status)
+                    : n.status === filter)),
+          );
+        $("count").textContent = "(" + data.nodes.length + ")";
+        $("services").innerHTML =
+          rows
+            .map(
+              (n) =>
+                `<tr><td><button data-service="${esc(n.name)}">${esc(n.name)}</button><small>${esc(n.project || "standalone")}</small></td><td>${badge(n)}<small>${esc(n.state)}</small></td><td>${num(n.cpu_percent)}${n.cpu_percent == null ? "" : "%"}</td><td>${n.stats_ok ? bytes(n.memory_bytes) + " / " + bytes(n.memory_limit) : "—"}</td><td>${bytes(n.rx_bytes_sec)} / ${bytes(n.tx_bytes_sec)}<small>bytes per second</small></td><td>${n.restarts}</td><td>${n.state === "running" ? age(n.started_at) : "—"}</td><td>${/^https?:\/\//.test(n.url || "") ? `<a href="${esc(n.url.replace(/^http:/, "https:"))}" target="_blank" rel="noopener">Open ↗</a>` : "—"}</td></tr>`,
+            )
+            .join("") ||
+          '<tr><td colspan="8" class="empty">ไม่พบ service ที่ตรงกับตัวกรอง</td></tr>';
+        document.querySelectorAll("[data-service]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              select(b.dataset.service);
+              $("detail").scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+            }),
+        );
+      }
+      function freshness() {
+        let stale =
+          fetchFailed ||
+          !data?.sampled_at ||
+          Date.now() - Date.parse(data.sampled_at) > 45000 ||
+          !!data.error;
+        document.body.classList.toggle("stale", stale);
+        $("banner").hidden = !stale;
+        $("banner").textContent = fetchFailed
+          ? "ติดต่อระบบสถานะไม่ได้ — ข้อมูลด้านล่างเป็นค่าล่าสุดที่เคยได้รับ"
+          : data?.error ||
+            "ข้อมูลยังไม่พร้อมหรือเก่าเกิน 45 วินาที — ไม่สามารถยืนยันสถานะปัจจุบันได้";
+        $("fresh").textContent = data?.sampled_at
+          ? "อัปเดต " +
+            new Date(data.sampled_at).toLocaleTimeString() +
+            " · " +
+            Math.max(
+              0,
+              Math.floor((Date.now() - Date.parse(data.sampled_at)) / 1000),
+            ) +
+            " วินาทีที่แล้ว"
+          : "กำลังเก็บข้อมูลครั้งแรก…";
+      }
+      function render() {
+        const ns = data.nodes,
+          checks = data.checks;
+        $("healthy").textContent = ns.filter(
+          (n) => n.status === "healthy",
+        ).length;
+        $("issues").textContent =
+          ns.filter((n) => ["down", "degraded"].includes(n.status)).length +
+          checks.filter((c) => c.status === "failed").length;
+        $("unknown").textContent = ns.filter((n) =>
+          ["unknown", "starting"].includes(n.status),
+        ).length;
+        let cp = ns.filter((n) => n.cpu_percent != null),
+          mem = ns.filter((n) => n.stats_ok);
+        $("cpu").textContent =
+          data.host?.cpu_percent != null
+            ? num(data.host.cpu_percent) + "%"
+            : "—";
+        $("memory").textContent = bytes(data.host?.ram_used_bytes);
+        $("cpunote").textContent =
+          "Netdata · " + data.host_cpus + " logical cores";
+        $("memnote").textContent =
+          "จากทั้งหมด " + bytes(data.host_memory_bytes);
+        $("disk").textContent = bytes(data.host?.disk_available_bytes);
+        $("disknote").textContent =
+          "ใช้แล้ว " + bytes(data.host?.disk_used_bytes);
+        $("checks").innerHTML = checks
+          .map(
+            (c) =>
+              `<div class="probe ${esc(c.status)}"><strong>${esc(c.name)}</strong><span><i class="dot"></i>${esc(statusText[c.status])} · ${Math.round(c.latency_ms)} ms</span><small>${esc(c.detail)}</small></div>`,
+          )
+          .join("");
+        drawGraph();
+        details();
+        table();
+        freshness();
+      }
+      async function refresh() {
+        if (loading) return;
+        loading = true;
+        $("refresh").disabled = true;
+        try {
+          let r = await fetch("/api/status", {
+            cache: "no-store",
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!r.ok) throw Error("Unavailable");
+          let d = await r.json();
+          d.nodes = d.nodes || [];
+          d.edges = d.edges || [];
+          d.checks = d.checks || [];
+          data = d;
+          fetchFailed = false;
+          render();
+        } catch (e) {
+          fetchFailed = true;
+          freshness();
+        } finally {
+          loading = false;
+          $("refresh").disabled = false;
+        }
+      }
+      $("flowScope").onchange = drawGraph;
+      $("refresh").onclick = refresh;
+      $("search").oninput = table;
+      $("filter").onchange = table;
+      window.addEventListener("resize", drawEdges);
+      setInterval(refresh, 10000);
+      setInterval(freshness, 1000);
+      refresh();
+    </script>
+  </body>
+</html>
