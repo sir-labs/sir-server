@@ -13,13 +13,18 @@ own volume, and never in this repo's workspace:
 | API | `sir-data-api-1:8000` |
 | Postgres | `sir-data-db-1:5432` |
 | Objects (MinIO) | `sir-data-minio-1:9000` |
-| Events (RabbitMQ) | `sir-data-rabbitmq-1:5672` |
+| Fanout (RabbitMQ) | `sir-data-rabbitmq-1:5672` |
+| Event log (Kafka) | `sir-data-kafka-1:9092` |
+| Cache (Redis) | `sir-data-redis-1:6379` |
 
 Services address each other **by container name** on `sir-server_sir-net`, never through a
 public hostname — a service calling `https://data.sir-labs.com` would take a round trip
 through cloudflared and the login gate to reach a container next door.
 
 Physical storage lives under `~/.sir-labs` (`$SIR_LABS_DATA`) on the host.
+
+Only `sir-data-api-1` is reached by other services. The rest are sir-data's internals and
+publish no host port — none of them should ever get a `proxy.enable` label.
 
 ## What the gateway guarantees, and what depends on it
 
