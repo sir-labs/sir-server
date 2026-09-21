@@ -176,3 +176,56 @@ Set `proxy.max_body_size: "51m"` to allow a 50 MiB file plus multipart framing.
 This only changes that virtual host. Without the label nginx keeps its default.
 Only positive integer sizes with an optional `k` or `m` suffix are accepted;
 invalid values are ignored. Application-level limits still apply.
+
+
+## Live system status
+
+The default dashboard at `https://proxy.sir-labs.com/` shows the service dependency
+map, Docker health and resource samples, Netdata host CPU/RAM/root disk, and
+authenticated application path checks. Existing routes remain at `/routes/view`
+(HTML) and `/routes` (JSON); `/api/status` is the cached monitoring snapshot.
+The existing sir-auth gateway still protects all these public paths.
+
+- Collects read-only Docker inventory, inspection and one-shot stats about every
+  10–20 seconds, with a 25-second collection deadline and six concurrent Docker calls.
+- `running` without a healthcheck is **not verified**, not healthy. Stopped
+  containers remain visible (including intentionally stopped older projects).
+  Deleted containers previously seen are retained as missing until watcher restart.
+- CPU is percent of one core per container; RAM excludes inactive filesystem cache;
+  network rates use differences between consecutive samples. First samples and
+  reset counters are unknown, not zero. Netdata host metrics are separate and
+  rejected when more than 60 seconds old.
+- Browser marks the entire view stale after 45 seconds without fresh data or on
+  API failure. A failed Docker inventory fetch never refreshes the old timestamp.
+- Graph lines describe configured dependencies, not observed per-request traces.
+  Core mappings cover ingress/auth/PostgreSQL/MCP/OCR/RabbitMQ/worker; other HTTP
+  routes are discovered from Docker labels. Select all services for the full map.
+- Independent path checks cover auth HTTP health, authenticated gateway→OCR health,
+  gateway→MCP initialize/tools-list, and public HTTPS→MCP initialization. These
+  checks never submit OCR work. They do not assert OCR inference correctness or
+  replace queue-depth/job-progress telemetry.
+
+For authenticated probes provision `~/.config/sir-server/monitor/token` on the
+Docker host, mode 0600 (parent directory 0700), containing a valid sirpat token.
+The directory is mounted read-only; the credential is read each cycle, so rotation
+needs no restart. Never commit it. Missing credentials show unknown probes; expired
+credentials show failures. Probe results contain no token, response bodies, env
+values or healthcheck logs. Set `monitor.exclude=true` to omit temporary containers.
+
+For a read-only preview, start the watcher with `MONITOR_ONLY=true` and the Docker
+socket mounted read-only. This mode does not generate nginx configs or connect
+containers to networks. Bind the preview to loopback and keep it off public routes.
+Tests: `cd gateway/watcher && go test -race ./... && go vet ./...`. The Docker
+build also runs the Go tests before producing the runtime image.
+
+Browser verification: install Playwright, then run `python tests/browser_check.py`.
+It defaults to `http://127.0.0.1:8080`; `STATUS_URL` selects another target,
+`SIR_PAT` authenticates HTTPS checks, and `STATUS_EVIDENCE_DIR` selects the screenshot
+folder. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` optionally selects a local Chromium binary.
+The check covers desktop/mobile, node selection, filtering, all-service flow,
+and simulated stale/failed data without stopping production services.
+
+CI deploys only sir-watcher when a push changes only watcher files and this
+workflow. Other changes use the full Compose deployment without forced recreation.
+Both paths use the shared deployment lock and verify that the status API collects
+a nonempty snapshot.
