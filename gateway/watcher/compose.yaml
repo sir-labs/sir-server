@@ -10,6 +10,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - nginx-conf:/etc/nginx/conf.d
       - ${HOME}/.config/sir-server/monitor:/run/sir-monitor:ro
+      - ${HOME}/.config/sir-domains:/run/sir-domains:ro
     environment:
       DOMAIN: ${DOMAIN:-sir-labs.com}
       NGINX_CONTAINER: sir-nginx

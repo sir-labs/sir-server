@@ -168,8 +168,16 @@ server {
         return 404;
     }
 
+{{end}}{{if .IsDomainsHost}}    location = /api/v1/deployments {
+        proxy_pass http://{{.Name}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Auth-User-Id "";
+        proxy_set_header X-Auth-Role "";
+        proxy_set_header Authorization $http_authorization;
+    }
 {{end}}    location / {
-{{if .Gated}}{{.AuthGate}}{{end}}{{.AuthHeaders}}        proxy_pass http://{{.Name}};
+{{if .Gated}}{{.AuthGate}}{{end}}{{if .IsDomainsHost}}        proxy_set_header Authorization $http_authorization;
+{{else}}{{.AuthHeaders}}{{end}}        proxy_pass http://{{.Name}};
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -393,7 +401,7 @@ func isHealthy(ctx context.Context, cli *client.Client, containerID string) bool
 	return !(info.State != nil && info.State.Health != nil && info.State.Health.Status == "unhealthy")
 }
 
-func reloadNginx(ctx context.Context, cli *client.Client) {
+func reloadNginx(ctx context.Context, cli *client.Client) error {
 	info, err := cli.ContainerInspect(ctx, nginxContainer)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
@@ -401,7 +409,7 @@ func reloadNginx(ctx context.Context, cli *client.Client) {
 		} else {
 			log.Printf("[WARNING] Nginx not ready, skipping reload: %v", err)
 		}
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 
 	execResp, err := cli.ContainerExecCreate(ctx, info.ID, containertypes.ExecOptions{
@@ -411,13 +419,13 @@ func reloadNginx(ctx context.Context, cli *client.Client) {
 	})
 	if err != nil {
 		log.Printf("[WARNING] Nginx not ready, skipping reload: %v", err)
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 
 	hijacked, err := cli.ContainerExecAttach(ctx, execResp.ID, containertypes.ExecStartOptions{})
 	if err != nil {
 		log.Printf("[WARNING] Nginx exec attach failed: %v", err)
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 	defer hijacked.Close()
 
@@ -427,18 +435,19 @@ func reloadNginx(ctx context.Context, cli *client.Client) {
 	inspect, err := cli.ContainerExecInspect(ctx, execResp.ID)
 	if err != nil {
 		log.Printf("[WARNING] Nginx exec inspect failed: %v", err)
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 	if inspect.ExitCode != 0 {
 		log.Printf("[ERROR] nginx config test failed:\n%s", errBuf.String())
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 
 	if err := cli.ContainerKill(ctx, info.ID, "HUP"); err != nil {
 		log.Printf("[WARNING] Nginx kill HUP failed: %v", err)
-		return
+		return fmt.Errorf("nginx reload failed")
 	}
 	log.Printf("[INFO] Nginx reloaded")
+	return nil
 }
 
 type confData struct {
@@ -452,7 +461,8 @@ func renderHostConf(d confData) (string, error) {
 		confData
 		AuthServer, AuthGate, AuthHeaders string
 		IsAuthHost                        bool
-	}{d, authServerBlock(), authGateDirectives, authHeaders(d.Gated), d.Hostname == authHost})
+		IsDomainsHost                     bool
+	}{d, authServerBlock(), authGateDirectives, authHeaders(d.Gated), d.Hostname == authHost, d.Hostname == "domains."+domain})
 	return buf.String(), err
 }
 
@@ -541,6 +551,13 @@ func maxBodySize(value string) string {
 }
 
 func generateConfigs(ctx context.Context, cli *client.Client) {
+	generationMu.Lock()
+	defer generationMu.Unlock()
+	managed, managedErr := fetchManaged(ctx)
+	if managedErr != nil {
+		log.Printf("[ERROR] Managed registry unavailable: %v", managedErr)
+		return
+	}
 	log.Printf("[INFO] Regenerating nginx configs...")
 
 	connectedIDs := getConnectedIDs(ctx, cli, proxyNetwork)
@@ -565,6 +582,10 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 			hostname = fmt.Sprintf("%s.%s", name, domain)
 		}
 
+		if !nativeClaimAllowed(managed, hostname, c.Labels) {
+			log.Printf("[WARNING] Domain claim mismatch: %s", hostname)
+			continue
+		}
 		// Shared path-based routing: every container that opts into internalHost
 		// is exposed at internalHost/{proxy.port}/ instead of getting its own
 		// hostname. The port doubles as the URL path segment, so it must be
@@ -642,6 +663,11 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 		log.Printf("[INFO] Proxy: %s -> %s:%s", hostname, ip, port)
 	}
 
+	if err := appendManaged(managed, confContents, newRoutes, usedHostnames); err != nil {
+		reportManaged(managed, err)
+		return
+	}
+	backup := backupConfigs()
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -677,6 +703,14 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 		os.Remove(internalIndexPath) //nolint:errcheck
 	}
 
+	if !sameConfigs(backup, backupConfigs()) {
+		if err := reloadNginx(ctx, cli); err != nil {
+			restoreConfigs(backup)
+			reportManaged(managed, err)
+			return
+		}
+	}
+	reportManaged(managed, nil)
 	for k := range routes {
 		delete(routes, k)
 	}
@@ -684,7 +718,6 @@ func generateConfigs(ctx context.Context, cli *client.Client) {
 		routes[k] = v
 	}
 
-	reloadNginx(ctx, cli)
 }
 
 func watchEvents(ctx context.Context, cli *client.Client) {
@@ -734,6 +767,7 @@ func main() {
 
 	liveLogs = &logService{docker: cli, authorize: authorizeLogs, known: knownLogContainer, slots: make(chan struct{}, 8)}
 	http.HandleFunc("/", serveHTTP)
+	go managedPoll(ctx, cli)
 	go func() {
 		log.Printf("[INFO] Dashboard on port %s", dashboardPort)
 		if err := http.ListenAndServe(":"+dashboardPort, nil); err != nil {
